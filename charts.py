@@ -4,7 +4,8 @@ import numpy as np
 import pandas as pd
 import io
 import base64
-
+import plotly.express as px
+import plotly.graph_objects as go
 def fig_to_base64(fig):
     buf = io.BytesIO()
     fig.savefig(buf, format='png', bbox_inches='tight')
@@ -13,43 +14,67 @@ def fig_to_base64(fig):
     plt.close(fig)
     return img_str
 
-def plot_corr_matrix_section(X_scaled, corr_with_market):
-    html = "<h2>Market Correlation</h2>"
-    fig, ax = plt.subplots(figsize=(10, 6))
-    sns.histplot(corr_with_market, bins=30, kde=True, ax=ax, color='skyblue')
-    ax.set_title("Distribution of Stock Correlations with Market Mean")
-    html += f'<img src="data:image/png;base64,{fig_to_base64(fig)}" style="width:100%">'
-    return html
-
 def plot_pca_summary_section(pca_table):
-    html = "<h2>PCA Component Summary</h2>"
-    html += pca_table.to_html(classes='data', border=1, float_format="%.4f")
+    html = "<h2>PCA Component Summary (Top 10)</h2>"
+    html += pca_table.head(10).to_html(classes='data', border=1, float_format="%.4f", index=False)
     return html
 
-def plot_pca_scatter_section(df_pca, explained_var):
+def plot_pca_scatter_section(df_pca, pca_table):
     html = "<h2>Global PCA Scatter (Static)</h2>"
     fig, ax = plt.subplots(figsize=(12, 8))
+    pc1_var = pca_table.iloc[0]['Explained Variance']
+    pc2_var = pca_table.iloc[1]['Explained Variance']
+    
     sns.scatterplot(x='PC1', y='PC2', data=df_pca, alpha=0.6, ax=ax)
-    ax.set_xlabel(f'PC1 ({explained_var[0]:.1%} var)')
-    ax.set_ylabel(f'PC2 ({explained_var[1]:.1%} var)')
+    ax.set_xlabel(f'PC1 ({pc1_var:.1%} var)')
+    ax.set_ylabel(f'PC2 ({pc2_var:.1%} var)')
+    
     ax.set_title("Stocks projected onto PC1 vs PC2 (Entire Period)")
+    
     html += f'<img src="data:image/png;base64,{fig_to_base64(fig)}" style="width:100%">'
     return html
 
-def plot_scree_section(explained_var, cum_explained_var):
+def plot_scree_section(pca_table):
+    # Wyciągamy wartości z DataFrame z powrotem do wektorów dla wykresu
+    explained_var = pca_table['Explained Variance'].values
+    cum_explained_var = pca_table['Cumulative Variance'].values
+    
     html = "<h2>Scree Plot</h2>"
     fig, ax = plt.subplots(figsize=(10, 5))
+    
+    # x_range to po prostu numery od 1 do liczby wierszy w tabeli
     x_range = range(1, len(explained_var) + 1)
+    
     ax.bar(x_range, explained_var, alpha=0.5, label='Individual')
     ax.step(x_range, cum_explained_var, where='mid', label='Cumulative', color='red')
+    
     ax.set_title("Explained Variance by Component")
+    ax.set_xlabel("Principal Component")
+    ax.set_ylabel("Variance Ratio")
     ax.legend()
+    
+    html += f'<img src="data:image/png;base64,{fig_to_base64(fig)}" style="width:100%">'
+    return html
+
+def plot_static_kmeans_section(df_pca_clustered, pca_table, kmeans):
+    """
+    Generates HTML section for Static Global K-Means.
+    """
+    html = "<h2>Global PCA with K-Means Clustering</h2>"
+    
+    # Get explained variance for labels
+    explained_variance = pca_table['Explained Variance'].values
+    
+    # Reuse the existing plotting logic which returns a Figure
+    fig = plot_clustered_pca(df_pca_clustered, explained_variance, kmeans)
+    
     html += f'<img src="data:image/png;base64,{fig_to_base64(fig)}" style="width:100%">'
     return html
 
 def plot_clustering_section(df_pca_static, explained_var, n_clusters, results_time, timestamps):
     html = "<h2>PCA-Based Dynamic Clustering</h2>"
     
+    # 1. Stability (Churn) Calculation for PCA results
     cluster_changes = []
     for i in range(1, len(results_time)):
         prev_df = results_time[i-1]
@@ -70,6 +95,7 @@ def plot_clustering_section(df_pca_static, explained_var, n_clusters, results_ti
     html += f"<h3>PCA Stability</h3>"
     html += f'<img src="data:image/png;base64,{fig_to_base64(fig)}" style="width:100%">'
     
+    # 2. Last Frame Scatter
     last_df = results_time[-1]
     fig2, ax2 = plt.subplots(figsize=(12, 8))
     sns.scatterplot(x='PC1', y='PC2', hue='Cluster', data=last_df, palette='viridis', s=100, ax=ax2)
@@ -85,6 +111,7 @@ def plot_tsne_section(tsne_results, timestamps, stability_scores):
         
     html = "<h2>t-SNE Based Dynamic Clustering</h2>"
     
+    # 1. Stability Plot
     fig, ax = plt.subplots(figsize=(12, 5))
     ax.plot(timestamps, stability_scores, color='#e74c3c', marker='o', linewidth=2)
     ax.set_title('t-SNE Cluster Instability (Churn Rate)')
@@ -107,34 +134,12 @@ def plot_tsne_section(tsne_results, timestamps, stability_scores):
     
     return html
 
-def build_final_html(parts):
-    body = "\n<hr>".join(parts)
-    return f"""
-    <html>
-    <head>
-        <title>Market Clustering Report</title>
-        <style>
-            body {{ font-family: Arial, sans-serif; margin: 40px; max-width: 1200px; margin: 0 auto; padding: 20px; }}
-            img {{ max-width: 100%; height: auto; border: 1px solid #ddd; margin: 20px 0; }}
-            table.data {{ border-collapse: collapse; width: 100%; }}
-            table.data th, table.data td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-            table.data th {{ background-color: #f2f2f2; }}
-            h1 {{ color: #2c3e50; margin-top: 60px; }}
-            h2 {{ color: #34495e; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-top: 40px; }}
-        </style>
-    </head>
-    <body>
-        {body}
-    </body>
-    </html>
-    """
-
 def plot_cluster_evolution(results, timestamps, n_clusters=5):
     """Returns Figure object for cluster evolution heatmap."""
     # Find top stocks (most frequent in data) - usually all are present
     all_stocks = results[0].index
     
-    # Select sample of stocks (e.g., first 30) for readability
+    # Select sample of stocks (e.g., first 40) for readability
     top_stocks = all_stocks[:40] 
     
     cluster_matrix = []
@@ -154,7 +159,6 @@ def plot_cluster_evolution(results, timestamps, n_clusters=5):
     ax.set_xlabel('Time Period')
     fig.tight_layout()
     return fig
-
 
 def plot_cluster_stability(results, timestamps):
     """Returns Figure object for stability plot."""
@@ -188,13 +192,12 @@ def plot_interactive_cluster_evolution(df_pca, cluster_labels):
     ax.text(0.5, 0.5, "Interactive plots require Jupyter Notebook", ha='center')
     return fig
 
-
 def plot_clustered_pca(df_pca_results, explained_variance, kmeans):
     """
     Returns the Figure object for PCA scatter with cluster coloring.
     Does NOT call plt.show() to allow saving to HTML.
     """
-    # Używamy plt.subplots aby mieć kontrolę nad obiektem Figure
+    # Use plt.subplots to have control over the Figure object
     fig, ax = plt.subplots(figsize=(12, 10))
     
     sns.scatterplot(
@@ -218,11 +221,11 @@ def plot_clustered_pca(df_pca_results, explained_variance, kmeans):
     ax.axhline(0, color='black', linestyle='--', alpha=0.3)
     ax.grid(True, alpha=0.3)
     
-    # Przesunięcie legendy
+    # Move legend
     ax.legend(title='Cluster', bbox_to_anchor=(1.05, 1), loc='upper left')
     
     fig.tight_layout()
-    return fig  # <--- KLUCZOWE: Zwracamy wykres, nie wyświetlamy go
+    return fig  # <--- KEY: Return the figure, do not display it
 
 def plot_model_comparison(metrics_df):
     """
@@ -258,21 +261,58 @@ def plot_model_comparison(metrics_df):
     html += f'<img src="data:image/png;base64,{fig_to_base64(fig)}" style="width:100%">'
     return html
 
-def plot_tsne_quality(tsne_model):
+def get_static_dbscan_figure(df_res):
     """
-    Wizualizuje 'błąd' t-SNE, czyli KL Divergence, jako odpowiednik 'Explained Variance' w PCA.
+    Generuje wykres punktowy dla statycznego t-SNE + DBSCAN.
     """
-    kl_divergence = tsne_model.kl_divergence_
-    n_iter = tsne_model.n_iter_
+    df_plot = df_res.copy()
+    # Konwersja klastra na string dla dyskretnych kolorów
+    df_plot['Cluster_Str'] = df_plot['Cluster'].astype(str)
     
-    html = "<h2>Jakość Dopasowania t-SNE</h2>"
-    html += f"""
-    <div style='background-color: #f8f9fa; padding: 15px; border-radius: 5px; border: 1px solid #ddd;'>
-        <h3>Kullback-Leibler Divergence: {kl_divergence:.4f}</h3>
-        <p>W przeciwieństwie do PCA, t-SNE nie posiada 'wyjaśnionej wariancji'. Zamiast tego minimalizuje 
-        <b>Dywersgencję KL</b>, która mierzy, ile informacji tracimy spłaszczając dane do 2D. 
-        Niższa wartość oznacza lepsze zachowanie lokalnej struktury sąsiedztwa.</p>
-        <p>Algorytm osiągnął ten wynik po <b>{n_iter}</b> iteracjach.</p>
-    </div>
+    # Oznaczamy szum (-1) jako 'Noise' dla legendy
+    df_plot['Cluster_Label'] = df_plot['Cluster'].apply(lambda x: 'Noise' if x == -1 else f'Cluster {x}')
+    
+    fig = px.scatter(
+        df_plot, 
+        x='x', 
+        y='y',
+        color='Cluster_Label',
+        hover_name=df_plot.index,
+        title='Static t-SNE + DBSCAN Structure (Global)',
+        color_discrete_sequence=px.colors.qualitative.G10
+    )
+    
+    # Stylizacja
+    fig.update_traces(marker=dict(size=6, opacity=0.8, line=dict(width=0.5, color='DarkSlateGrey')))
+    fig.update_layout(
+        template='plotly_white',
+        legend_title_text='Group',
+        height=600
+    )
+    
+    return fig
+
+def get_static_tsne_figure(df_coords):
     """
-    return html
+    Rysuje surowy wykres t-SNE (Geometry only).
+    Bez kolorowania klastrami (chyba że dodamy np. zmienność jako kolor).
+    """
+    fig = px.scatter(
+        df_coords, 
+        x='x', 
+        y='y',
+        hover_name=df_coords.index, # Nazwa spółki po najechaniu
+        title='Static t-SNE Geometry (Raw Projection)',
+        opacity=0.7
+    )
+    
+    fig.update_traces(marker=dict(size=6, color='#3366CC', line=dict(width=0.5, color='white')))
+    
+    fig.update_layout(
+        template='plotly_white',
+        height=700,
+        xaxis_title="t-SNE Dimension 1",
+        yaxis_title="t-SNE Dimension 2"
+    )
+    
+    return fig

@@ -1,13 +1,18 @@
 import pandas as pd
 import numpy as np
 from sklearn.cluster import KMeans
-from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
 from tqdm import tqdm
 
+# Import twojej funkcji PCA
+from pca import run_pca
+
 def cluster_pca_results(df_pca_results, n_clusters=5):
+    """
+    Pomocnicza funkcja do klastrowania pojedynczego wyniku PCA (jeśli potrzebna poza pętlą).
+    """
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
     clusters = kmeans.fit_predict(df_pca_results[['PC1', 'PC2']])
     df_pca_results['Cluster'] = clusters
@@ -15,6 +20,10 @@ def cluster_pca_results(df_pca_results, n_clusters=5):
 
 
 def analyze_clusters_over_time(df_returns, window_size=60, step_size=20, n_clusters=5, n_components=10):
+    """
+    Analiza ewolucji klastrów w czasie z wykorzystaniem PCA i KMeans.
+    Zapewnia stabilność kolorów (Hungarian Algorithm) i stabilność osi PCA.
+    """
     scaler = StandardScaler()
     
     results = []
@@ -34,40 +43,36 @@ def analyze_clusters_over_time(df_returns, window_size=60, step_size=20, n_clust
             
         df_window = df_returns.iloc[start_idx:end_idx]
         
-        # 1. PCA Calculation
+        # 1. Scaling & PCA Calculation (używając funkcji z pca.py)
+        # Skalujemy okno tutaj, aby zachować logikę "per window"
         X_scaled = scaler.fit_transform(df_window)
-        pca = PCA(n_components=n_components)
-        # Note: PCA in sklearn expects (samples, features). 
-        # Here samples=Days, features=Stocks. This is correct for finding market factors.
-        # But for clustering STOCKS, we need loadings (Stocks x Components).
-        pca.fit(X_scaled)
         
-        # Loadings (Stocks x Components)
-        loadings = pca.components_.T
+        # run_pca zwraca (df_pca, pca_table). Interesuje nas tylko df_pca (loadings)
+        # Przekazujemy df_window.columns jako indeks, żeby df_pca miało nazwy spółek
+        df_pca_window, _ = run_pca(X_scaled, df_window.columns, n_components=n_components)
         
         # --- PCA AXIS ALIGNMENT (Sign flipping) ---
+        # PCA może losowo odwracać znaki wektorów własnych.
+        # Sprawdzamy korelację z poprzednim krokiem i odwracamy w razie potrzeby.
         if prev_pca_df is not None:
-            # Use only common stocks for alignment
-            common_stocks = df_window.columns.intersection(prev_pca_df.index)
+            # Używamy tylko wspólnych spółek do porównania
+            common_stocks = df_pca_window.index.intersection(prev_pca_df.index)
             
             if len(common_stocks) > 0:
-                current_df_temp = pd.DataFrame(loadings, index=df_window.columns)
-                curr_common = current_df_temp.loc[common_stocks]
-                prev_common = prev_pca_df.loc[common_stocks]
-                
-                for comp_idx in range(n_components):
-                    # Check correlation
-                    corr = np.corrcoef(curr_common.iloc[:, comp_idx], prev_common.iloc[:, comp_idx])[0, 1]
-                    if corr < 0:
-                        loadings[:, comp_idx] *= -1
-        
-        df_pca_window = pd.DataFrame(loadings, columns=[f'PC{j+1}' for j in range(n_components)], index=df_window.columns)
+                for col in df_pca_window.columns: # Iterujemy po PC1, PC2...
+                    curr_vec = df_pca_window.loc[common_stocks, col]
+                    prev_vec = prev_pca_df.loc[common_stocks, col]
+                    
+                    # Jeśli korelacja jest ujemna, odwracamy znak całej kolumny
+                    if np.corrcoef(curr_vec, prev_vec)[0, 1] < 0:
+                        df_pca_window[col] *= -1
         
         # 2. Clustering with WARM START
-        data_to_cluster = loadings[:, :2] # Cluster on PC1 and PC2
+        # Bierzemy dwie pierwsze składowe do klastrowania
+        data_to_cluster = df_pca_window.iloc[:, :2].values
         
         if prev_centers is not None:
-            # init=prev_centers forces algorithm to start where it finished last time
+            # init=prev_centers zmusza algorytm do startu tam, gdzie skończył ostatnio
             kmeans = KMeans(n_clusters=n_clusters, init=prev_centers, n_init=1, random_state=42)
         else:
             kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
@@ -78,6 +83,7 @@ def analyze_clusters_over_time(df_returns, window_size=60, step_size=20, n_clust
         current_labels = kmeans.labels_.copy()
         
         # 3. Hungarian Algorithm for Label Matching
+        # Dopasowujemy numery klastrów (0, 1, 2...) tak, aby "zielony" klaster pozostawał "zielony"
         if prev_centers is not None:
             dists = cdist(prev_centers, curr_centers)
             row_ind, col_ind = linear_sum_assignment(dists)
@@ -85,7 +91,7 @@ def analyze_clusters_over_time(df_returns, window_size=60, step_size=20, n_clust
             remapping = {new_idx: old_idx for old_idx, new_idx in zip(row_ind, col_ind)}
             new_labels = np.array([remapping[label] for label in current_labels])
             
-            # Align centers for next iteration
+            # Wyrównujemy centra do następnej iteracji
             aligned_centers = np.zeros_like(curr_centers)
             for new_idx, old_idx in remapping.items():
                 aligned_centers[old_idx] = curr_centers[new_idx]
@@ -94,7 +100,7 @@ def analyze_clusters_over_time(df_returns, window_size=60, step_size=20, n_clust
             curr_centers = aligned_centers 
             
         else:
-            # Initial sort for consistency
+            # Sortowanie początkowe dla spójności (np. od lewej do prawej na osi X)
             sorted_idx = np.argsort(curr_centers[:, 0])
             mapping = {old_idx: new_idx for new_idx, old_idx in enumerate(sorted_idx)}
             new_labels = np.array([mapping[label] for label in current_labels])
@@ -104,7 +110,9 @@ def analyze_clusters_over_time(df_returns, window_size=60, step_size=20, n_clust
         prev_centers = curr_centers
         prev_pca_df = df_pca_window.copy()
         
+        # Przypisujemy ostateczne etykiety do DataFrame
         df_pca_window['Cluster'] = current_labels
+        
         results.append(df_pca_window)
         timestamps.append(df_returns.index[end_idx - 1])
     
