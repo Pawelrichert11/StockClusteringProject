@@ -6,13 +6,9 @@ from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
 from tqdm import tqdm
 
-# Import twojej funkcji PCA
 from pca import run_pca
 
 def cluster_pca_results(df_pca_results, n_clusters=5):
-    """
-    Pomocnicza funkcja do klastrowania pojedynczego wyniku PCA (jeśli potrzebna poza pętlą).
-    """
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
     clusters = kmeans.fit_predict(df_pca_results[['PC1', 'PC2']])
     df_pca_results['Cluster'] = clusters
@@ -20,10 +16,6 @@ def cluster_pca_results(df_pca_results, n_clusters=5):
 
 
 def analyze_clusters_over_time(df_returns, window_size=60, step_size=20, n_clusters=5, n_components=10):
-    """
-    Analiza ewolucji klastrów w czasie z wykorzystaniem PCA i KMeans.
-    Zapewnia stabilność kolorów (Hungarian Algorithm) i stabilność osi PCA.
-    """
     scaler = StandardScaler()
     
     results = []

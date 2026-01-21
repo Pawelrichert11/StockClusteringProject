@@ -106,8 +106,6 @@ def preprocess_data(df_prices, filter_outliers=True):
         df_returns = df_returns[high_corr_stocks]
     else:
         print(f"Preprocessing: No filtering. Keeping all {len(X_scaled.columns)} stocks.")
-
-
     return X_scaled, df_returns
 
 def calculate_trustworthiness_comparison(df_returns_filtered, df_pca, results_tsne, window_size):
@@ -157,16 +155,16 @@ def calculate_top_pairs(coords_df, original_returns, top_n=10):
             'stock_b': t2,
             'distance': dist,
             'correlation': correlation
-        })
+        })``
         
     return results
 
-def calculate_pairs_html(coords_df, original_returns, top_n=10):
-    pairs_data1 = calculate_top_pairs(coords_df, original_returns, top_n)
-    html_pca_pairs = build_pairs_html(pairs_data1, "PCA")
+def calculate_pairs_html(coords_kmeans, coords_dbscan, original_returns, top_n=10):
+    pairs_data1 = calculate_top_pairs(coords_kmeans, original_returns, top_n)
+    html_pca_pairs = build_pairs_html(pairs_data1, "k-Means PCA")
 
-    pairs_data2 = calculate_top_pairs(coords_df, original_returns, top_n)
-    html_tsne_pairs = build_pairs_html(pairs_data2, "t-SNE")
+    pairs_data2 = calculate_top_pairs(coords_dbscan, original_returns, top_n)
+    html_tsne_pairs = build_pairs_html(pairs_data2, "DBSCAN t-SNE")
 
     return html_pca_pairs, html_tsne_pairs
 
@@ -215,7 +213,7 @@ if __name__ == "__main__":
     df_pca, pca_table = run_pca(X_filtered, X_filtered.columns.tolist(), N_COMPONENTS)
 
     df_tsne_coords = compute_tsne_snapshot(
-        df_returns_filtered, 
+        X_filtered, 
         perplexity=30, 
         random_state=42
     )
@@ -226,7 +224,7 @@ if __name__ == "__main__":
     html_parts.extend(build_static_kmeans(df_pca_static, pca_table, kmeans_static))
 
     df_static_dbscan = perform_static_dbscan_analysis(
-        df_returns_filtered, 
+        X_filtered, 
         perplexity=30, 
         eps=0.5, 
         min_samples=5
@@ -259,8 +257,7 @@ if __name__ == "__main__":
     
     df_metrics = calculate_comparison_metrics(df_returns_filtered, results_pca, times_pca, results_tsne, WINDOW_SIZE)
     html_parts.extend(build_quality_metrics(df_metrics))
-    #TODO TUTAJ ZMIENIĆ NA OBIE ANALIZY
-    html_pca_pairs, html_tsne_pairs= calculate_pairs_html(df_pca.iloc[:, :5], df_returns_filtered, top_n=10)
+    html_pca_pairs, html_tsne_pairs= calculate_pairs_html(df_pca.iloc[:, :5], df_static_dbscan[['x', 'y']], df_returns_filtered, top_n=10)
     html_parts.extend(build_pairs_analysis(df_pca, results_tsne, df_returns_filtered, html_pca_pairs, html_tsne_pairs))
 
     save_report(html_parts)

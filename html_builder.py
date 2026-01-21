@@ -15,16 +15,12 @@ from charts import (
     get_static_dbscan_figure,
     get_static_tsne_figure
 )
-
-# --- CONFIG ---
-# Style for academic descriptions
 STYLE_DESC = "font-family: 'Times New Roman', serif; font-size: 1.1em; text-align: justify; margin-bottom: 20px; color: #333;"
 
 def build_pca(df_pca, pca_table):
     html_parts = []
     html_parts.append("<h1>Part 1: Global Market Structure (PCA)</h1>")
     
-    # 1. PCA Summary Table
     html_parts.append(f"""
     <div style="{STYLE_DESC}">
     <b>Table 1. Explained Variance by Principal Components.</b><br>
@@ -35,7 +31,6 @@ def build_pca(df_pca, pca_table):
     """)
     html_parts.append(plot_pca_summary_section(pca_table))
     
-    # 2. Scree Plot
     html_parts.append(f"""
     <div style="{STYLE_DESC}">
     <b>Figure 1. Eigenvalue Spectrum (Scree Plot).</b><br>
@@ -44,8 +39,7 @@ def build_pca(df_pca, pca_table):
     </div>
     """)
     html_parts.append(plot_scree_section(pca_table))
-    
-    # 3. PCA Scatter Plot
+
     html_parts.append(f"""
     <div style="{STYLE_DESC}">
     <b>Figure 2. Projection of Asset Universe onto the First Two Principal Components.</b><br>
@@ -190,18 +184,13 @@ def build_final_html(parts):
     """
 
 def generate_trustworthiness_section(score_pca, score_tsne):
-    """
-    Generates an HTML section comparing the Trustworthiness metric.
-    """
-    # Set winner color
     color_pca = "green" if score_pca > score_tsne else "black"
     color_tsne = "green" if score_tsne >= score_pca else "black"
     weight_pca = "bold" if score_pca > score_tsne else "normal"
     weight_tsne = "bold" if score_tsne >= score_pca else "normal"
     
-    # Using raw string r"" to avoid syntax warnings with LaTeX symbols
     html = r"""
-    <div style='background-color: #fcfcfc; padding: 20px; border: 1px solid #ddd; margin-top: 30px;'>
+    <div style='background-color:
         <h2 style='margin-top: 0;'>Neighborhood Preservation Analysis (Trustworthiness)</h2>
         <div style="font-family: 'Times New Roman', serif; font-size: 1.1em; text-align: justify; margin-bottom: 20px; color: #333;">
         <b>Table 2. Trustworthiness Metric Comparison ($0 \le T \le 1$).</b><br>
@@ -235,9 +224,6 @@ def generate_trustworthiness_section(score_pca, score_tsne):
     return html.format(score_pca=score_pca, score_tsne=score_tsne, color_pca=color_pca, color_tsne=color_tsne, weight_pca=weight_pca, weight_tsne=weight_tsne)
 
 def build_pairs_html(pairs_data, method_name="PCA"):
-    """
-    PRESENTATION ONLY: Takes structured data (list of dicts) and returns an HTML string.
-    """
     top_n = len(pairs_data)
     
     html = f"<h2>Top {top_n} Most Similar Pairs ({method_name})</h2>"
@@ -257,13 +243,11 @@ def build_pairs_html(pairs_data, method_name="PCA"):
     """
     
     for rank, item in enumerate(pairs_data, 1):
-        # Determine formatting for correlation
         corr_val = item['correlation']
         
         if pd.isna(corr_val):
             corr_str = "N/A"
         else:
-            # Color logic: Green if strong correlation (>0.8), else black
             corr_color = "green" if corr_val > 0.8 else "black"
             corr_str = f"<span style='color:{corr_color}; font-weight:bold'>{corr_val:.4f}</span>"
             
@@ -280,23 +264,7 @@ def build_pairs_html(pairs_data, method_name="PCA"):
     html += "</tbody></table>"
     return html
 
-# --- Wrapper Function (Keep this so main.py doesn't break) ---
-def generate_top_pairs_section(coords_df, original_returns, method_name="PCA", top_n=10):
-    """
-    Orchestrator: Calls calculation logic first, then HTML generation.
-    """
-    # 1. Calculate
-    pairs_data = calculate_top_pairs(coords_df, original_returns, top_n)
-    
-    # 2. Render
-    return build_pairs_html(pairs_data, method_name)
-
 def calculate_top_pairs(coords_df, original_returns, top_n=10):
-    """
-    LOGIC ONLY: Finds pairs of stocks that are closest in the reduced space
-    and calculates their actual historical correlation.
-    Returns a list of dictionaries with results.
-    """
     dist_matrix = squareform(pdist(coords_df.values))
     np.fill_diagonal(dist_matrix, np.inf)
     
@@ -346,13 +314,9 @@ def build_static_kmeans(df_pca, pca_table, kmeans_model):
     return html_parts
 
 def build_static_dbscan(df_res):
-    """
-    Buduje sekcję HTML dla statycznego wyniku t-SNE + DBSCAN.
-    """
     fig = get_static_dbscan_figure(df_res)
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs='cdn')
     
-    # Obliczanie prostych statystyk do tekstu
     n_clusters = len(set(df_res['Cluster'])) - (1 if -1 in df_res['Cluster'] else 0)
     noise_count = list(df_res['Cluster']).count(-1)
     noise_pct = noise_count / len(df_res) * 100
@@ -377,9 +341,6 @@ def build_static_dbscan(df_res):
     return html
 
 def build_static_tsne_only(df_coords):
-    """
-    Buduje sekcję HTML dla samego wykresu t-SNE (bez tabeli klastrów).
-    """
     fig = get_static_tsne_figure(df_coords)
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs='cdn')
     

@@ -4,44 +4,18 @@ from sklearn.cluster import DBSCAN
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
-# Importujemy silnik obliczeniowy
 from tsne import compute_tsne_snapshot
 
 def perform_static_dbscan_analysis(df_returns, perplexity=30, eps=0.5, min_samples=5):
-    """
-    Wykonuje analizę statyczną (Globalny snapshot całego okresu).
-    """
-    print("--- Running Static t-SNE + DBSCAN ---")
-    
-    # 1. Obliczamy geometrię (t-SNE)
-    print(f"Computing t-SNE Geometry (perplexity={perplexity})...")
     df_coords = compute_tsne_snapshot(df_returns, perplexity=perplexity)
-    
-    # 2. Skalujemy współrzędne przed DBSCAN (dla spójności eps)
-    scaler = StandardScaler()
-    coords_scaled = scaler.fit_transform(df_coords[['x', 'y']])
-    
-    # 3. Uruchamiamy DBSCAN
-    print(f"Clustering with DBSCAN (eps={eps}, min_samples={min_samples})...")
     dbscan = DBSCAN(eps=eps, min_samples=min_samples)
-    clusters = dbscan.fit_predict(coords_scaled)
-    
+
+    clusters = dbscan.fit_predict(df_coords)
     df_result = df_coords.copy()
-    df_result['Cluster'] = clusters
-    
-    # Statystyki szumu
-    n_noise = list(clusters).count(-1)
-    noise_pct = n_noise / len(clusters) * 100
-    n_clusters = len(set(clusters)) - (1 if -1 in clusters else 0)
-    print(f"Static Result: Found {n_clusters} clusters. Noise: {noise_pct:.1f}%")
-    
+    df_result['Cluster'] = clusters    
     return df_result
 
-def analyze_rolling_dbscan(df_returns, window_size=60, step_size=20, perplexity=30, eps=0.6, min_samples=3):
-    """
-    Wykonuje analizę w oknach kroczących (Rolling Window).
-    Zarządza stabilnością kolorów (memory).
-    """
+def analyze_rolling_dbscan(df_returns, window_size=60, step_size=20, perplexity=30, eps=3.0, min_samples=3):
     results = []      
     timestamps = []   
     stability_scores = [] 
@@ -52,21 +26,22 @@ def analyze_rolling_dbscan(df_returns, window_size=60, step_size=20, perplexity=
     total_steps = (len(df_returns) - window_size) // step_size + 1
     
     for i in tqdm(range(total_steps), desc="Rolling t-SNE+DBSCAN"):
-        # 1. Definicja okna
         start_idx = i * step_size
         end_idx = start_idx + window_size
         
         if end_idx > len(df_returns):
             break
             
-        df_window = df_returns.iloc[start_idx:end_idx]
-        current_stocks = df_window.columns.tolist()
+        df_window_raw = df_returns.iloc[start_idx:end_idx]
+        current_stocks = df_window_raw.columns.tolist()
         
-        # 2. Geometria (z tsne.py)
-        df_coords = compute_tsne_snapshot(df_window, perplexity=perplexity)
+        scaler = StandardScaler()
+        X_window_scaled_vals = scaler.fit_transform(df_window_raw)
+        X_window_scaled = pd.DataFrame(X_window_scaled_vals, index=df_window_raw.index, columns=df_window_raw.columns)
         
-        # 3. Klastrowanie + Stabilizacja
+        df_coords = compute_tsne_snapshot(X_window_scaled, perplexity=perplexity)
         X_embedded = df_coords[['x', 'y']].values
+
         labels, churn_rate = _run_dbscan_step_with_memory(
             X_embedded, 
             current_stocks, 
@@ -89,14 +64,9 @@ def analyze_rolling_dbscan(df_returns, window_size=60, step_size=20, perplexity=
     return results, timestamps, stability_scores
 
 def _run_dbscan_step_with_memory(X_embedded, current_stocks, prev_labels, prev_stocks, eps, min_samples):
-    """
-    Pomocnicza funkcja wykonująca jeden krok DBSCAN i dopasowująca kolory do poprzedniego kroku.
-    """
-    # Standaryzacja WYNIKÓW t-SNE (żeby eps działał tak samo niezależnie od skali wykresu)
     scaler_tsne = StandardScaler()
     X_embedded_norm = scaler_tsne.fit_transform(X_embedded)
     
-    # Właściwy DBSCAN
     db = DBSCAN(eps=eps, min_samples=min_samples)
     labels = db.fit_predict(X_embedded_norm)
     
